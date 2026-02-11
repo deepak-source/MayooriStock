@@ -10,10 +10,10 @@ import os
 BASE_URL = "https://leadapi-crchenf4csgagcef.centralindia-01.azurewebsites.net/api"
 
 AUTH_PAYLOAD = {
-    "comid": "19621202",
-    "comkey": "91163813",
-    "oid": "11",
-    "sid": "1337"
+    "comid": "19621273",
+    "comkey": "82246338",
+    "oid": "4",
+    "sid": "274"
 }
 
 PAGE_SIZE = 10
