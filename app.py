@@ -16,16 +16,14 @@ AUTH_PAYLOAD = {
     "sid": "274"
 }
 
-PAGE_SIZE = 10
+PAGE_SIZE = 12
 
 st.set_page_config(page_title="Lead Accounting Plus | Stock Report", layout="wide")
 
 # Directory for PDF images
 os.makedirs("pdf_images", exist_ok=True)
 
-
 tab_stock, tab_po = st.tabs(["📦 Stock Report", "🧾 Purchase Order"])
-
 
 # ---------------- HELPERS ----------------
 def has_stock(qty):
@@ -36,26 +34,19 @@ def has_stock(qty):
 
 
 def download_and_prepare_image(url, goods_id):
-    """
-    Downloads image from URL, converts to RGB JPEG and saves locally.
-    This is REQUIRED for FPDF to render images.
-    """
     try:
         r = requests.get(url, timeout=8)
         r.raise_for_status()
-
         img = Image.open(BytesIO(r.content))
-        img = img.convert("RGB")  # CRITICAL
-
+        img = img.convert("RGB")
         path = f"pdf_images/{goods_id}.jpg"
         img.save(path, format="JPEG", quality=85)
-
         return path
     except:
         return None
 
 
-# ---------------- API HELPERS ----------------
+# ---------------- COMMON APIs ----------------
 def get_locations():
     payload = {
         **AUTH_PAYLOAD,
@@ -122,7 +113,6 @@ def export_full_stock_to_pdf(location_id, search_text):
     while True:
         data = get_inventory(page, location_id, search_text)
         items = data.get("items", [])
-
         if not items:
             break
 
@@ -138,20 +128,13 @@ def export_full_stock_to_pdf(location_id, search_text):
             x = pdf.get_x()
             y = pdf.get_y()
 
-            # Image cell
             pdf.cell(35, row_height, "", border=1)
 
             images = get_item_images(item["id"])
             if images:
                 img_path = download_and_prepare_image(images[0], item["id"])
                 if img_path:
-                    pdf.image(
-                        img_path,
-                        x=x + 2,
-                        y=y + 2,
-                        w=30,
-                        h=30
-                    )
+                    pdf.image(img_path, x=x + 2, y=y + 2, w=30, h=30)
 
             pdf.set_xy(x + 35, y)
 
@@ -172,68 +155,144 @@ def export_full_stock_to_pdf(location_id, search_text):
 
     return pdf.output(dest="S").encode("latin1")
 
-
-# ---------------- UI ----------------
-
+# =====================================================
+# 📦 STOCK TAB (UPDATED TO GETGOODS)
+# =====================================================
 with tab_stock:
     st.title("📦 Stock Report")
 
+    @st.cache_data(ttl=600)
+    def get_vendors():
+        payload = {
+            **AUTH_PAYLOAD,
+            "startrow": "0",
+            "page": "1",
+            "pagesize": "1000",
+            "type": "account"
+        }
+        return requests.post(f"{BASE_URL}/getrows", json=payload).json().get("items", [])
+
+    @st.cache_data(ttl=600)
+    def get_categories(parent_id=""):
+        payload = {
+            **AUTH_PAYLOAD,
+            "startrow": "0",
+            "page": "1",
+            "pagesize": "100",
+            "type": "category",
+            "document": "7",
+            "parent": parent_id
+        }
+        return requests.post(f"{BASE_URL}/getrows", json=payload).json().get("items", [])
+
+    def get_goods(page, location_id="", search="", category="", vendor=""):
+        payload = {
+            **AUTH_PAYLOAD,
+            "startrow": str((page - 1) * PAGE_SIZE + 1),
+            "page": str(page),
+            "pagesize": str(PAGE_SIZE),
+            "goods": "",
+            "barcode": search,
+            "name": search,
+            "category": category,
+            "account": "",
+            "online": "",
+            "vendor": vendor
+        }
+        return requests.post(f"{BASE_URL}/getgoods", json=payload).json()
+
+    # -------- FILTER ROW --------
     locations = get_locations()
+    vendors = get_vendors()
+    parent_categories = get_categories("")
+
+    f1, f2, f3, f4, f5 = st.columns([2, 2, 2, 2, 3])
+
     location_map = {"All Locations": ""}
     for loc in locations:
         location_map[loc["name"]] = loc["id"]
-
-    selected_location = st.selectbox("Select Location", location_map.keys())
+    selected_location = f1.selectbox("Location", location_map.keys())
     location_id = location_map[selected_location]
 
-    search_text = st.text_input(
-        "🔍 Search item by name or code",
-        placeholder="Type item name or barcode..."
-    )
+    vendor_map = {"All Vendors": ""}
+    for v in vendors:
+        vendor_map[v["name"]] = v["id"]
+    selected_vendor = f2.selectbox("Vendor", vendor_map.keys())
+    vendor_id = vendor_map[selected_vendor]
+
+    parent_map = {"All Categories": ""}
+    for c in parent_categories:
+        parent_map[c["name"]] = c["id"]
+    selected_parent = f3.selectbox("Parent Category", parent_map.keys())
+    parent_id = parent_map[selected_parent]
+
+    child_categories = get_categories(parent_id) if parent_id else []
+    child_map = {"All Subcategories": ""}
+    for c in child_categories:
+        child_map[c["name"]] = c["id"]
+    selected_child = f4.selectbox("Sub Category", child_map.keys())
+    category_id = child_map[selected_child] or parent_id
+
+    search_text = f5.text_input("🔍 Search", placeholder="Name or barcode...")
 
     if "page" not in st.session_state:
         st.session_state.page = 1
 
-    data = get_inventory(st.session_state.page, location_id, search_text)
+    data = get_goods(
+        st.session_state.page,
+        location_id,
+        search_text,
+        category_id,
+        vendor_id
+    )
 
-    items = [
-        item for item in data.get("items", [])
-        # if has_stock(item.get("quantity"))
-    ]
-
+    items = data.get("items", [])
     total_rows = int(data.get("totalrows", 0))
     total_pages = math.ceil(total_rows / PAGE_SIZE)
 
     st.markdown("### Stock Items")
 
     if not items:
-        st.info("No items found with stock.")
+        st.info("No items found.")
     else:
-        for item in items:
-            col1, col2 = st.columns([1, 3])
+        cols_per_row = 4
+        rows = math.ceil(len(items) / cols_per_row)
 
-            with col1:
-                images = get_item_images(item["id"])
-                if images:
+        idx = 0
+        for _ in range(rows):
+            cols = st.columns(cols_per_row)
+            for col in cols:
+                if idx >= len(items):
+                    break
+                item = items[idx]
+                with col:
                     st.markdown(
                         f"""
-                        <div style="height:120px; overflow-y:auto">
-                            {''.join([f'<img src="{img}" width="100"><br>' for img in images])}
+                        <div style="
+                            height:160px;
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+                            border:1px solid #eee;
+                            border-radius:8px;
+                            background:#fafafa;
+                            margin-bottom:6px;
+                        ">
+                            <img src="{item.get('image','')}"
+                                style="max-height:140px;
+                                        max-width:100%;
+                                        object-fit:contain;" />
                         </div>
                         """,
                         unsafe_allow_html=True
-                    )
-                else:
-                    st.write("No Image")
+)
+                    st.markdown(f"**{item['name']}**")
+                    st.caption(f"Code: {item.get('code','-')}")
+                    st.caption(f"Unit: {item.get('unit','-')}")
+                    st.caption(f"Stock: {item.get('stock','0')}")
+                    st.caption(f"Price: ₹{item.get('price','0')}")
+                idx += 1
 
-            with col2:
-                st.write(f"**{item['name']}**")
-                st.write(f"Code: {item['code']}")
-                st.write(f"Unit: {item['unit']} | Qty: {item['quantity']} | Amount: ₹{item['amount']}")
-
-            st.divider()
-
-    # Pagination
     col1, col2, col3 = st.columns([1, 2, 1])
 
     with col1:
@@ -249,7 +308,6 @@ with tab_stock:
             st.session_state.page += 1
             st.rerun()
 
-    # Export
     st.markdown("---")
 
     if st.button("📄 Export Full Stock to PDF"):
@@ -260,6 +318,7 @@ with tab_stock:
             file_name="stock_report.pdf",
             mime="application/pdf"
         )
+
 
 with tab_po:
     st.title("🧾 Multi-Location Purchase Order")
