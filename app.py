@@ -206,7 +206,7 @@ with tab_stock:
     vendors = get_vendors()
     parent_categories = get_categories("")
 
-    f1, f2, f3, f4, f5 = st.columns([2, 2, 2, 2, 3])
+    f1, f2, f3, f4 = st.columns([2, 2, 2, 3])
 
     location_map = {"All Locations": ""}
     for loc in locations:
@@ -220,20 +220,74 @@ with tab_stock:
     selected_vendor = f2.selectbox("Vendor", vendor_map.keys())
     vendor_id = vendor_map[selected_vendor]
 
-    parent_map = {"All Categories": ""}
-    for c in parent_categories:
-        parent_map[c["name"]] = c["id"]
-    selected_parent = f3.selectbox("Parent Category", parent_map.keys())
-    parent_id = parent_map[selected_parent]
+    # ---------- CATEGORY HIERARCHY PICKER ----------
 
-    child_categories = get_categories(parent_id) if parent_id else []
-    child_map = {"All Subcategories": ""}
-    for c in child_categories:
-        child_map[c["name"]] = c["id"]
-    selected_child = f4.selectbox("Sub Category", child_map.keys())
-    category_id = child_map[selected_child] or parent_id
+    if "category_path" not in st.session_state:
+        st.session_state.category_path = []
 
-    search_text = f5.text_input("🔍 Search", placeholder="Name or barcode...")
+
+    # Show selected tags
+    if st.session_state.category_path:
+        tag_cols = st.columns(len(st.session_state.category_path))
+        for i, cat in enumerate(st.session_state.category_path):
+            with tag_cols[i]:
+                if st.button(f"❌ {cat['name']}", key=f"cat_tag_{i}"):
+                    st.session_state.category_path = st.session_state.category_path[:i]
+                    st.rerun()
+
+    # Determine current parent
+    current_parent = (
+        st.session_state.category_path[-1]["id"]
+        if st.session_state.category_path
+        else ""
+    )
+
+    # Load next level
+    next_categories = get_categories(current_parent)
+
+    cat_options = ["Select Category"] + [c["name"] for c in next_categories]
+
+    selected_cat = f3.selectbox(
+        "Category",
+        cat_options,
+        key="category_selector"
+    )
+
+    if selected_cat != "Select Category":
+        selected_obj = next(
+            c for c in next_categories if c["name"] == selected_cat
+        )
+
+        st.session_state.category_path.append({
+            "id": selected_obj["id"],
+            "name": selected_obj["name"]
+        })
+
+        st.rerun()
+
+    # Final category id for API
+    category_id = (
+        st.session_state.category_path[-1]["id"]
+        if st.session_state.category_path
+        else ""
+    )
+
+    # parent_map = {"All Categories": ""}
+    # for c in parent_categories:
+    #     parent_map[c["name"]] = c["id"]
+    # selected_parent = f3.selectbox("Parent Category", parent_map.keys())
+    # parent_id = parent_map[selected_parent]
+
+    # child_categories = get_categories(parent_id) if parent_id else []
+    # child_map = {"All Subcategories": ""}
+    # for c in child_categories:
+    #     child_map[c["name"]] = c["id"]
+    # selected_child = f4.selectbox("Sub Category", child_map.keys())
+    # category_id = child_map[selected_child] or parent_id
+
+
+
+    search_text = f4.text_input("🔍 Search", placeholder="Name or barcode...")
 
     if "page" not in st.session_state:
         st.session_state.page = 1
