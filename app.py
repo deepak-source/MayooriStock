@@ -479,13 +479,13 @@ with tab_stock:
     # Load next level
     next_categories = get_categories(current_parent)
 
+    # ---------- CATEGORY DROPDOWN ----------
     cat_options = ["Select Category"] + [c["name"] for c in next_categories]
 
     selected_cat = f3.selectbox(
         "Category",
         cat_options,
-        key="category_selector",
-        index=0
+        key="category_selector"
     )
 
     if selected_cat != "Select Category":
@@ -498,7 +498,9 @@ with tab_stock:
             "name": selected_obj["name"]
         })
 
-        st.session_state.category_selector = "Select Category"
+        # ✅ SAFE reset using deletion (Streamlit-approved)
+        if "category_selector" in st.session_state:
+            del st.session_state["category_selector"]
 
         st.rerun()
 
